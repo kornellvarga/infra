@@ -1,0 +1,15 @@
+# Copy to a node-local, ignored configuration when needed.
+# Experiment definitions refer to logical resource ids; this file resolves them
+# to machine-specific paths/devices.
+
+[node]
+id = "example-node"
+
+[paths]
+models = "/path/to/models"
+data = "/path/to/data"
+artifacts = "/path/to/artifacts"
+
+[compute]
+# Logical defaults only; experiments should not hard-code physical GPU ids.
+default_gpu = "auto"
