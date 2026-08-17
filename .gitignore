@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Local models / caches / datasets
+models/
+data/
+cache/
+artifacts/
+raw-results/
+*.gguf
+*.safetensors
+
+# Local experiment state
+.env
+.env.*
+!.env.example
+.workspaces/
+.runs/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
