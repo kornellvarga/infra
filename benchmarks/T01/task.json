@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "id": "T01",
+  "title": "Repair a broken addition function",
+  "prompt": "The public add(a, b) function returns incorrect results. Fix the implementation without changing its name, arguments, or return type.",
+  "seed": "benchmarks/T01/seed",
+  "acceptance": "benchmarks/T01/acceptance.py"
+}

@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "id": "E001",
+  "title": "Deterministic harness baseline",
+  "purpose": "Validate the experiment runner, workspace isolation, acceptance testing, and result provenance before attaching a real local model.",
+  "default_adapter": "fake-known-patch-v1",
+  "tasks": ["T01"],
+  "timeout_seconds": 60
+}
