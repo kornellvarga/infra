@@ -71,7 +71,7 @@ class E002AdapterTest(unittest.TestCase):
             self.assertIn("none", command)
             self.assertNotIn("-j", command)
             self.assertIn("--output-file", command)
-            self.assertEqual(result.metrics["output_transport"], "llama-cli-output-file")
+            self.assertEqual(result.metrics["output_transport"], "llama-cli-output-file-with-stdout-fallback")
             self.assertEqual(result.metrics["json_constraint"], "post-generation-strict-validation")
             self.assertEqual(result.metrics["model_id"], "Qwen/Qwen2.5-Coder-3B-Instruct-GGUF")
 
@@ -85,6 +85,16 @@ class E002AdapterTest(unittest.TestCase):
             )
             captured = adapter._assistant_output(output, "llama UI banner without JSON")
         self.assertEqual(captured, '{"path":"calc.py","content":"fixed"}')
+
+    def test_empty_output_file_falls_back_to_cli_stdout(self) -> None:
+        adapter = LlamaQwen25Coder3BB0Adapter()
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "llama-output.txt"
+            output.write_text("", encoding="utf-8")
+            stdout = "llama UI\n```json\n{\"path\":\"calc.py\",\"content\":\"fixed\"}\n```\n"
+            captured = adapter._assistant_output(output, stdout)
+        self.assertEqual(captured, stdout.strip())
+        self.assertEqual(adapter._json_object(captured)["path"], "calc.py")
 
     def test_model_cannot_write_a_file_outside_snapshot(self) -> None:
         adapter = LlamaQwen25Coder3BB0Adapter()
