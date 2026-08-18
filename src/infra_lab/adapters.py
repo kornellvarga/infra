@@ -26,12 +26,7 @@ class AgentAdapter(Protocol):
 
 
 class FakeKnownPatchAdapter:
-    """Deterministic adapter used only to validate the E001 harness.
-
-    It is intentionally not intelligent: it applies one known patch to T01 so
-    failures in E001 point at the runner/provenance/test plumbing rather than at
-    model quality.
-    """
+    """Deterministic adapter used only to validate the E001 harness."""
 
     adapter_id = "fake-known-patch-v1"
 
@@ -54,10 +49,10 @@ class FakeKnownPatchAdapter:
 class LlamaQwen25Coder3BB0Adapter:
     """B0: one local-model turn over a bounded workspace snapshot.
 
-    This deliberately has no iterative tool loop, self-review, test feedback,
-    memory, or retry. The model receives the task plus the current text files
-    and must return one JSON-contract full-file replacement. Later experiments
-    can add capabilities one at a time against this baseline.
+    There is no iterative tool loop, self-review, test feedback, memory, or
+    retry. The model receives the task plus current text files and returns one
+    tagged full-file replacement. Later experiments add capabilities one at a
+    time against this baseline.
     """
 
     adapter_id = "llama-qwen25-coder-3b-q4km-b0"
@@ -66,6 +61,10 @@ class LlamaQwen25Coder3BB0Adapter:
     expected_llama_release = "b10218"
     max_workspace_bytes = 48_000
     max_file_bytes = 32_000
+    _file_block_re = re.compile(
+        r'<file\s+path="([^"\r\n]+)">\s*\n?(.*?)\n?</file>',
+        flags=re.DOTALL,
+    )
 
     @staticmethod
     def _manifest_path() -> Path:
@@ -104,9 +103,7 @@ class LlamaQwen25Coder3BB0Adapter:
             if not path.is_file():
                 continue
             rel = path.relative_to(workspace)
-            if ".git" in rel.parts:
-                continue
-            if path.stat().st_size > self.max_file_bytes:
+            if ".git" in rel.parts or path.stat().st_size > self.max_file_bytes:
                 continue
             try:
                 text = path.read_text(encoding="utf-8")
@@ -123,19 +120,15 @@ class LlamaQwen25Coder3BB0Adapter:
             raise RuntimeError("B0 adapter found no bounded text files in the task workspace")
         return "".join(blocks), allowed
 
-    @staticmethod
-    def _json_object(stdout: str) -> dict[str, Any]:
-        decoder = json.JSONDecoder()
-        for index, char in enumerate(stdout):
-            if char != "{":
-                continue
-            try:
-                value, _ = decoder.raw_decode(stdout[index:])
-            except json.JSONDecodeError:
-                continue
-            if isinstance(value, dict):
-                return value
-        raise RuntimeError("local model did not return a JSON edit object")
+    @classmethod
+    def _file_edit(cls, output: str) -> tuple[str, str]:
+        matches = cls._file_block_re.findall(output)
+        if len(matches) != 1:
+            raise RuntimeError("local model must return exactly one tagged file edit")
+        path, content = matches[0]
+        if len(content.encode("utf-8")) > 100_000:
+            raise RuntimeError("local model replacement content is too large")
+        return path, content
 
     @staticmethod
     def _bounded_process_text(value: str, limit: int = 1600) -> str:
@@ -185,17 +178,19 @@ class LlamaQwen25Coder3BB0Adapter:
         snapshot, allowed = self._workspace_snapshot(workspace)
         model_prompt = (
             "You are a coding agent in a controlled benchmark. Fix the user's task using the workspace snapshot. "
-            "Return exactly one JSON object with `path`, `content`, and optionally `summary`. `path` must name "
-            "exactly one existing workspace file shown below. `content` must be the complete replacement content "
-            "for that file. Do not use markdown. Do not explain outside the JSON.\n\n"
+            "Return exactly one full-file edit using this format and nothing else:\n"
+            "<file path=\"EXACT_EXISTING_PATH\">\n"
+            "COMPLETE REPLACEMENT FILE CONTENT\n"
+            "</file>\n"
+            "The path must be exactly one existing workspace file shown below. Do not use markdown or code fences. "
+            "Do not add explanation before or after the file block.\n\n"
             f"TASK:\n{prompt}\n\nWORKSPACE SNAPSHOT:{snapshot}"
         )
         main_gpu = os.environ.get("INFRA_LLAMA_MAIN_GPU", "0")
         if main_gpu not in {"0", "1"}:
             raise RuntimeError("INFRA_LLAMA_MAIN_GPU must be 0 or 1")
-        timeout_raw = os.environ.get("INFRA_MODEL_TIMEOUT_SECONDS", "180")
         try:
-            timeout_seconds = int(timeout_raw)
+            timeout_seconds = int(os.environ.get("INFRA_MODEL_TIMEOUT_SECONDS", "180"))
         except ValueError as exc:
             raise RuntimeError("INFRA_MODEL_TIMEOUT_SECONDS must be an integer") from exc
         if not 10 <= timeout_seconds <= 1800:
@@ -204,21 +199,12 @@ class LlamaQwen25Coder3BB0Adapter:
         output_path = workspace.parent / "llama-assistant-output.txt"
         output_path.unlink(missing_ok=True)
         command = [
-            str(cli),
-            "-m", str(model_path),
-            "-ngl", "all",
-            "-sm", "none",
-            "-mg", main_gpu,
-            "-c", "4096",
-            "-n", "1024",
-            "--temp", "0",
-            "--seed", "1",
-            "--no-display-prompt",
-            "--no-warmup",
-            "-co", "off",
-            "-st",
-            "--simple-io",
-            "--output-file", str(output_path),
+            str(cli), "-m", str(model_path),
+            "-ngl", "all", "-sm", "none", "-mg", main_gpu,
+            "-c", "4096", "-n", "1024",
+            "--temp", "0", "--seed", "1",
+            "--no-display-prompt", "--no-warmup", "-co", "off",
+            "-st", "--simple-io", "--output-file", str(output_path),
             "-p", model_prompt,
         ]
         env = os.environ.copy()
@@ -241,7 +227,7 @@ class LlamaQwen25Coder3BB0Adapter:
             raise RuntimeError(f"llama.cpp inference failed with exit {started.returncode}: {detail}")
         model_output = self._assistant_output(output_path, started.stdout)
         try:
-            edit = self._json_object(model_output)
+            relative, content = self._file_edit(model_output)
         except RuntimeError as exc:
             output = self._bounded_process_text(model_output)
             stdout = self._bounded_process_text(started.stdout)
@@ -249,23 +235,14 @@ class LlamaQwen25Coder3BB0Adapter:
             raise RuntimeError(
                 f"{exc}; assistant_output={output}; llama_stdout={stdout}; llama_stderr={stderr}"
             ) from exc
-        relative = edit.get("path")
-        content = edit.get("content")
-        unknown = set(edit) - {"path", "content", "summary"}
-        if unknown:
-            raise RuntimeError("local model JSON edit contained unsupported keys")
-        if not isinstance(relative, str) or relative not in allowed:
+        if relative not in allowed:
             raise RuntimeError("local model selected a file outside the bounded existing workspace snapshot")
-        if not isinstance(content, str) or len(content.encode("utf-8")) > 100_000:
-            raise RuntimeError("local model replacement content is invalid or too large")
-        summary = edit.get("summary")
-        if summary is not None and not isinstance(summary, str):
-            raise RuntimeError("local model JSON summary must be a string when provided")
         target = (workspace / relative).resolve()
         root = workspace.resolve()
         if root not in target.parents or not target.is_file():
             raise RuntimeError("local model edit escaped the task workspace")
         target.write_text(content, encoding="utf-8")
+
         runtime_text = started.stdout + "\n" + started.stderr
         metrics = self._timing_metrics(runtime_text)
         metrics.update({
@@ -276,13 +253,13 @@ class LlamaQwen25Coder3BB0Adapter:
             "model_sha256": str(manifest.get("model", {}).get("sha256") or ""),
             "stderr_tail": started.stderr[-1500:],
             "output_transport": "llama-cli-output-file-with-stdout-fallback",
-            "json_constraint": "post-generation-strict-validation",
+            "edit_protocol": "tagged-file-v1",
         })
         return AdapterResult(
             adapter_id=self.adapter_id,
             tool_calls=1,
             files_touched=[relative],
-            notes=summary[:500] if isinstance(summary, str) and summary else "Single JSON-contract local-model edit.",
+            notes="Single tagged-file local-model edit.",
             metrics=metrics,
         )
 
