@@ -122,6 +122,15 @@ def compact_diff(workspace: Path) -> str:
     return git(workspace, "diff", "--no-ext-diff", "--unified=3").stdout[-12000:]
 
 
+def bounded_exception(exc: Exception, limit: int = 4000) -> str:
+    text = f"{type(exc).__name__}: {exc}"
+    if len(text) <= limit:
+        return text
+    prefix = min(500, limit // 4)
+    suffix = limit - prefix - len("...<truncated>...")
+    return text[:prefix] + "...<truncated>..." + text[-suffix:]
+
+
 def run_experiment(
     experiment_id: str,
     task_id: str,
@@ -180,7 +189,7 @@ def run_experiment(
     try:
         adapter_result = asdict(adapter.run(workspace, prompt))
     except Exception as exc:
-        adapter_error = f"{type(exc).__name__}: {exc}"[:1000]
+        adapter_error = bounded_exception(exc)
 
     acceptance = acceptance_result(acceptance, workspace, timeout_seconds)
     total_seconds = round(time.perf_counter() - started, 6)

@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from infra_lab.runner import run_experiment
+from infra_lab.runner import bounded_exception, run_experiment
 
 
 class E001RunnerTests(unittest.TestCase):
@@ -41,6 +41,15 @@ class E001RunnerTests(unittest.TestCase):
                     workspace_root=root / "workspaces",
                     results_root=root / "results",
                 )
+
+    def test_bounded_exception_keeps_failure_tail(self) -> None:
+        suffix = "FINAL_INTERNAL_RUNTIME_ERROR"
+        error = RuntimeError("prefix-" + ("x" * 6000) + suffix)
+        captured = bounded_exception(error, limit=1200)
+        self.assertLessEqual(len(captured), 1200)
+        self.assertIn("RuntimeError: prefix-", captured)
+        self.assertIn("...<truncated>...", captured)
+        self.assertTrue(captured.endswith(suffix))
 
 
 if __name__ == "__main__":
