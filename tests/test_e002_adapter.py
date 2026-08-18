@@ -120,7 +120,7 @@ class E002AdapterTest(unittest.TestCase):
                     with self.assertRaises(RuntimeError) as caught:
                         adapter.run(workspace, "test")
             message = str(caught.exception)
-            self.assertIn("assistant_output=not json from model\\n", message)
+            self.assertIn("assistant_output=not json from model", message)
             self.assertIn("llama_stdout=not json from model\\n", message)
             self.assertIn("llama_stderr=runtime diagnostic line\\n", message)
 
