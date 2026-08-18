@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "id": "E002",
+  "title": "B0 real local model single-shot edit",
+  "description": "Replace the deterministic fake adapter with one pinned local coding model while keeping T01 and hidden acceptance unchanged. No retries, reviewer, memory, hidden-test feedback, or iterative tool loop.",
+  "tasks": ["T01"],
+  "default_adapter": "llama-qwen25-coder-3b-q4km-b0",
+  "timeout_seconds": 300
+}
