@@ -138,6 +138,13 @@ class LlamaQwen25Coder3BB0Adapter:
         raise RuntimeError("local model did not return a JSON edit object")
 
     @staticmethod
+    def _bounded_process_text(value: str, limit: int = 1600) -> str:
+        if not value:
+            return "<empty>"
+        rendered = value.replace("\x00", "").replace("\r", "\\r").replace("\n", "\\n")
+        return rendered[-limit:]
+
+    @staticmethod
     def _timing_metrics(stderr: str) -> dict[str, Any]:
         metrics: dict[str, Any] = {}
         patterns = {
@@ -219,7 +226,14 @@ class LlamaQwen25Coder3BB0Adapter:
         if started.returncode != 0:
             detail = (started.stderr or started.stdout).strip().replace("\n", "; ")[-1000:]
             raise RuntimeError(f"llama.cpp inference failed with exit {started.returncode}: {detail}")
-        edit = self._json_object(started.stdout)
+        try:
+            edit = self._json_object(started.stdout)
+        except RuntimeError as exc:
+            stdout = self._bounded_process_text(started.stdout)
+            stderr = self._bounded_process_text(started.stderr)
+            raise RuntimeError(
+                f"{exc}; llama_stdout={stdout}; llama_stderr={stderr}"
+            ) from exc
         relative = edit.get("path")
         content = edit.get("content")
         if not isinstance(relative, str) or relative not in allowed:
