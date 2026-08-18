@@ -56,8 +56,8 @@ class LlamaQwen25Coder3BB0Adapter:
 
     This deliberately has no iterative tool loop, self-review, test feedback,
     memory, or retry. The model receives the task plus the current text files
-    and must return one schema-constrained full-file replacement. Later
-    experiments can add capabilities one at a time against this baseline.
+    and must return one JSON-contract full-file replacement. Later experiments
+    can add capabilities one at a time against this baseline.
     """
 
     adapter_id = "llama-qwen25-coder-3b-q4km-b0"
@@ -180,21 +180,11 @@ class LlamaQwen25Coder3BB0Adapter:
     def run(self, workspace: Path, prompt: str) -> AdapterResult:
         cli, model_path, manifest = self._runtime()
         snapshot, allowed = self._workspace_snapshot(workspace)
-        schema = {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string"},
-                "content": {"type": "string"},
-                "summary": {"type": "string"},
-            },
-            "required": ["path", "content"],
-            "additionalProperties": False,
-        }
         model_prompt = (
             "You are a coding agent in a controlled benchmark. Fix the user's task using the workspace snapshot. "
-            "Return exactly one JSON object matching the supplied schema. `path` must name exactly one existing "
-            "workspace file and `content` must be the complete replacement content for that file. Do not use markdown. "
-            "Do not explain outside the JSON.\n\n"
+            "Return exactly one JSON object with `path`, `content`, and optionally `summary`. `path` must name "
+            "exactly one existing workspace file shown below. `content` must be the complete replacement content "
+            "for that file. Do not use markdown. Do not explain outside the JSON.\n\n"
             f"TASK:\n{prompt}\n\nWORKSPACE SNAPSHOT:{snapshot}"
         )
         main_gpu = os.environ.get("INFRA_LLAMA_MAIN_GPU", "0")
@@ -226,7 +216,6 @@ class LlamaQwen25Coder3BB0Adapter:
             "-st",
             "--simple-io",
             "--output-file", str(output_path),
-            "-j", json.dumps(schema, separators=(",", ":")),
             "-p", model_prompt,
         ]
         env = os.environ.copy()
@@ -259,10 +248,16 @@ class LlamaQwen25Coder3BB0Adapter:
             ) from exc
         relative = edit.get("path")
         content = edit.get("content")
+        unknown = set(edit) - {"path", "content", "summary"}
+        if unknown:
+            raise RuntimeError("local model JSON edit contained unsupported keys")
         if not isinstance(relative, str) or relative not in allowed:
             raise RuntimeError("local model selected a file outside the bounded existing workspace snapshot")
         if not isinstance(content, str) or len(content.encode("utf-8")) > 100_000:
             raise RuntimeError("local model replacement content is invalid or too large")
+        summary = edit.get("summary")
+        if summary is not None and not isinstance(summary, str):
+            raise RuntimeError("local model JSON summary must be a string when provided")
         target = (workspace / relative).resolve()
         root = workspace.resolve()
         if root not in target.parents or not target.is_file():
@@ -278,13 +273,13 @@ class LlamaQwen25Coder3BB0Adapter:
             "model_sha256": str(manifest.get("model", {}).get("sha256") or ""),
             "stderr_tail": started.stderr[-1500:],
             "output_transport": "llama-cli-output-file",
+            "json_constraint": "post-generation-strict-validation",
         })
-        summary = edit.get("summary") if isinstance(edit.get("summary"), str) else ""
         return AdapterResult(
             adapter_id=self.adapter_id,
             tool_calls=1,
             files_touched=[relative],
-            notes=summary[:500] or "Single schema-constrained local-model edit.",
+            notes=summary[:500] if isinstance(summary, str) and summary else "Single JSON-contract local-model edit.",
             metrics=metrics,
         )
 
