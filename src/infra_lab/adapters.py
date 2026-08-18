@@ -173,8 +173,11 @@ class LlamaQwen25Coder3BB0Adapter:
             captured = output_path.read_text(encoding="utf-8", errors="replace")
             marker = "Assistant:\n"
             if marker in captured:
-                return captured.rsplit(marker, 1)[1].strip()
-            return captured.strip()
+                assistant = captured.rsplit(marker, 1)[1].strip()
+                if assistant:
+                    return assistant
+            elif captured.strip():
+                return captured.strip()
         return stdout.strip()
 
     def run(self, workspace: Path, prompt: str) -> AdapterResult:
@@ -272,7 +275,7 @@ class LlamaQwen25Coder3BB0Adapter:
             "quantization": self.expected_quant,
             "model_sha256": str(manifest.get("model", {}).get("sha256") or ""),
             "stderr_tail": started.stderr[-1500:],
-            "output_transport": "llama-cli-output-file",
+            "output_transport": "llama-cli-output-file-with-stdout-fallback",
             "json_constraint": "post-generation-strict-validation",
         })
         return AdapterResult(
