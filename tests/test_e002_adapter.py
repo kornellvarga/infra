@@ -70,7 +70,20 @@ class E002AdapterTest(unittest.TestCase):
             self.assertIn("-sm", command)
             self.assertIn("none", command)
             self.assertIn("-j", command)
+            self.assertIn("--output-file", command)
+            self.assertEqual(result.metrics["output_transport"], "llama-cli-output-file")
             self.assertEqual(result.metrics["model_id"], "Qwen/Qwen2.5-Coder-3B-Instruct-GGUF")
+
+    def test_output_file_assistant_section_is_preferred_over_cli_ui_stdout(self) -> None:
+        adapter = LlamaQwen25Coder3BB0Adapter()
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "llama-output.txt"
+            output.write_text(
+                "User:\nfix it\n\nAssistant:\n{\"path\":\"calc.py\",\"content\":\"fixed\"}\n\n",
+                encoding="utf-8",
+            )
+            captured = adapter._assistant_output(output, "llama UI banner without JSON")
+        self.assertEqual(captured, '{"path":"calc.py","content":"fixed"}')
 
     def test_model_cannot_write_a_file_outside_snapshot(self) -> None:
         adapter = LlamaQwen25Coder3BB0Adapter()
@@ -107,6 +120,7 @@ class E002AdapterTest(unittest.TestCase):
                     with self.assertRaises(RuntimeError) as caught:
                         adapter.run(workspace, "test")
             message = str(caught.exception)
+            self.assertIn("assistant_output=not json from model\\n", message)
             self.assertIn("llama_stdout=not json from model\\n", message)
             self.assertIn("llama_stderr=runtime diagnostic line\\n", message)
 
