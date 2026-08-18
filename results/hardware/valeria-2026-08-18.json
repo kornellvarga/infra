@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "observed_date": "2026-08-18",
+  "node": "valeria",
+  "cpu": {
+    "model": "Intel(R) Core(TM) i9-10980XE CPU @ 3.00GHz",
+    "logical_count_visible": 4
+  },
+  "ram_bytes_visible": 8589934592,
+  "python": "3.12.3",
+  "gpus": [
+    {
+      "index": 0,
+      "name": "NVIDIA GeForce RTX 3090",
+      "memory_mib": 24576,
+      "driver": "610.43.02",
+      "pci_bus_id": "00000000:19:00.0"
+    },
+    {
+      "index": 1,
+      "name": "NVIDIA GeForce RTX 3090",
+      "memory_mib": 24576,
+      "driver": "610.43.02",
+      "pci_bus_id": "00000000:68:00.0"
+    }
+  ],
+  "cuda_toolkit_nvcc": null,
+  "initial_local_inference_runtime": {
+    "llama_cli": null,
+    "llama_server": null,
+    "ollama": null,
+    "vllm": null,
+    "torch": null,
+    "cached_models": []
+  },
+  "storage_before_e002_bootstrap": {
+    "filesystem_total_bytes": 67049664512,
+    "filesystem_free_bytes_before_cleanup": 333803520,
+    "cache_bytes": 6923560552,
+    "pip_cache_bytes": 2751208247,
+    "unity_hdfo_cache_bytes": 4121702188,
+    "gradle_cache_bytes": 3072717067,
+    "generated_companion_build_bytes": 445738378,
+    "alternate_usable_mount_found": false
+  },
+  "provenance": {
+    "runtime_probe_response": "infra-e002-runtime-probe-20260818",
+    "runtime_probe_snapshot_sha256": "23822287b02f04acf5cdca35b45f9cbf45673f524cd5b7854eeeddf309b6fcba",
+    "storage_probe_response": "infra-e002-storage-detail-20260818"
+  }
+}
