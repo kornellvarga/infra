@@ -33,7 +33,7 @@ class E002AdapterTest(unittest.TestCase):
         )
         return cli, model, manifest
 
-    def test_real_adapter_is_registered_and_applies_schema_constrained_edit(self) -> None:
+    def test_real_adapter_is_registered_and_applies_strict_json_contract_edit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             workspace = root / "workspace"
@@ -69,9 +69,10 @@ class E002AdapterTest(unittest.TestCase):
             self.assertIn("all", command)
             self.assertIn("-sm", command)
             self.assertIn("none", command)
-            self.assertIn("-j", command)
+            self.assertNotIn("-j", command)
             self.assertIn("--output-file", command)
             self.assertEqual(result.metrics["output_transport"], "llama-cli-output-file")
+            self.assertEqual(result.metrics["json_constraint"], "post-generation-strict-validation")
             self.assertEqual(result.metrics["model_id"], "Qwen/Qwen2.5-Coder-3B-Instruct-GGUF")
 
     def test_output_file_assistant_section_is_preferred_over_cli_ui_stdout(self) -> None:
@@ -100,6 +101,23 @@ class E002AdapterTest(unittest.TestCase):
             with patch.dict(os.environ, {"INFRA_LOCAL_MODEL_MANIFEST": str(manifest)}, clear=False):
                 with patch("infra_lab.adapters.subprocess.run", return_value=fake):
                     with self.assertRaisesRegex(RuntimeError, "outside the bounded"):
+                        adapter.run(workspace, "test")
+
+    def test_model_json_rejects_unsupported_keys_after_generation(self) -> None:
+        adapter = LlamaQwen25Coder3BB0Adapter()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            (workspace / "calc.py").write_text("x = 1\n", encoding="utf-8")
+            _, _, manifest = self._runtime_fixture(root, adapter)
+            fake = subprocess.CompletedProcess(
+                args=[], returncode=0,
+                stdout='{"path":"calc.py","content":"x = 2\\n","extra":"not allowed"}', stderr="",
+            )
+            with patch.dict(os.environ, {"INFRA_LOCAL_MODEL_MANIFEST": str(manifest)}, clear=False):
+                with patch("infra_lab.adapters.subprocess.run", return_value=fake):
+                    with self.assertRaisesRegex(RuntimeError, "unsupported keys"):
                         adapter.run(workspace, "test")
 
     def test_invalid_model_output_preserves_bounded_stdout_and_stderr_for_diagnosis(self) -> None:
