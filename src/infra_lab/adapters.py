@@ -145,7 +145,7 @@ class LlamaQwen25Coder3BB0Adapter:
         return rendered[-limit:]
 
     @staticmethod
-    def _timing_metrics(stderr: str) -> dict[str, Any]:
+    def _timing_metrics(runtime_text: str) -> dict[str, Any]:
         metrics: dict[str, Any] = {}
         patterns = {
             "prompt_tokens": r"prompt eval time\s*=.*?/\s*(\d+) tokens",
@@ -154,10 +154,28 @@ class LlamaQwen25Coder3BB0Adapter:
             "generated_tokens_per_second": r"eval time\s*=.*?([0-9.]+) tokens per second",
         }
         for key, pattern in patterns.items():
-            match = re.search(pattern, stderr, flags=re.IGNORECASE)
+            match = re.search(pattern, runtime_text, flags=re.IGNORECASE)
             if match:
                 metrics[key] = float(match.group(1)) if "per_second" in key else int(match.group(1))
+        ui_timing = re.search(
+            r"\[\s*Prompt:\s*([0-9.]+)\s*t/s\s*\|\s*Generation:\s*([0-9.]+)\s*t/s\s*\]",
+            runtime_text,
+            flags=re.IGNORECASE,
+        )
+        if ui_timing:
+            metrics["prompt_tokens_per_second"] = float(ui_timing.group(1))
+            metrics["generated_tokens_per_second"] = float(ui_timing.group(2))
         return metrics
+
+    @staticmethod
+    def _assistant_output(output_path: Path, stdout: str) -> str:
+        if output_path.is_file():
+            captured = output_path.read_text(encoding="utf-8", errors="replace")
+            marker = "Assistant:\n"
+            if marker in captured:
+                return captured.rsplit(marker, 1)[1].strip()
+            return captured.strip()
+        return stdout.strip()
 
     def run(self, workspace: Path, prompt: str) -> AdapterResult:
         cli, model_path, manifest = self._runtime()
@@ -190,6 +208,8 @@ class LlamaQwen25Coder3BB0Adapter:
         if not 10 <= timeout_seconds <= 1800:
             raise RuntimeError("INFRA_MODEL_TIMEOUT_SECONDS must be from 10 to 1800")
 
+        output_path = workspace.parent / "llama-assistant-output.txt"
+        output_path.unlink(missing_ok=True)
         command = [
             str(cli),
             "-m", str(model_path),
@@ -205,6 +225,7 @@ class LlamaQwen25Coder3BB0Adapter:
             "-co", "off",
             "-st",
             "--simple-io",
+            "--output-file", str(output_path),
             "-j", json.dumps(schema, separators=(",", ":")),
             "-p", model_prompt,
         ]
@@ -226,13 +247,15 @@ class LlamaQwen25Coder3BB0Adapter:
         if started.returncode != 0:
             detail = (started.stderr or started.stdout).strip().replace("\n", "; ")[-1000:]
             raise RuntimeError(f"llama.cpp inference failed with exit {started.returncode}: {detail}")
+        model_output = self._assistant_output(output_path, started.stdout)
         try:
-            edit = self._json_object(started.stdout)
+            edit = self._json_object(model_output)
         except RuntimeError as exc:
+            output = self._bounded_process_text(model_output)
             stdout = self._bounded_process_text(started.stdout)
             stderr = self._bounded_process_text(started.stderr)
             raise RuntimeError(
-                f"{exc}; llama_stdout={stdout}; llama_stderr={stderr}"
+                f"{exc}; assistant_output={output}; llama_stdout={stdout}; llama_stderr={stderr}"
             ) from exc
         relative = edit.get("path")
         content = edit.get("content")
@@ -245,7 +268,8 @@ class LlamaQwen25Coder3BB0Adapter:
         if root not in target.parents or not target.is_file():
             raise RuntimeError("local model edit escaped the task workspace")
         target.write_text(content, encoding="utf-8")
-        metrics = self._timing_metrics(started.stderr)
+        runtime_text = started.stdout + "\n" + started.stderr
+        metrics = self._timing_metrics(runtime_text)
         metrics.update({
             "main_gpu": int(main_gpu),
             "llama_release": self.expected_llama_release,
@@ -253,6 +277,7 @@ class LlamaQwen25Coder3BB0Adapter:
             "quantization": self.expected_quant,
             "model_sha256": str(manifest.get("model", {}).get("sha256") or ""),
             "stderr_tail": started.stderr[-1500:],
+            "output_transport": "llama-cli-output-file",
         })
         summary = edit.get("summary") if isinstance(edit.get("summary"), str) else ""
         return AdapterResult(
